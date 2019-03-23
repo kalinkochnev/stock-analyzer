@@ -2,8 +2,13 @@ import requests
 import json
 from requests.exceptions import HTTPError
 from textblob import TextBlob
+from requests import get
+from requests.exceptions import RequestException
+from contextlib import closing
+from bs4 import BeautifulSoup
+from langdetect import detect
 
-
+#Stock symbol : Company name
 listOfStocks = {
     'AMD':'AMD',
     'AMZN':'Amazon',
@@ -14,6 +19,7 @@ listOfStocks = {
     'NVDA':'NVIDIA',
     }
 
+#Stock Symbol : (sentiment, number of values)
 stockSentiment = {
 
 }
@@ -31,27 +37,171 @@ def testURL(link):
     else:
         return ('Success!')
 
+def simple_get(url):
+    """
+    Attempts to get the content at `url` by making an HTTP GET request.
+    If the content-type of response is some kind of HTML/XML, return the
+    text content, otherwise return None.
+    """
+    try:
+        with closing(get(url, stream=True, timeout=3.05)) as resp:
+            if is_good_response(resp):
+                return resp.content
+            else:
+                print('Closing error or timeout')
+
+    except RequestException as e:
+        log_error('Error during requests to {0} : {1}'.format(url, str(e)))
+        print('Error during requestse')
+
+
+def is_good_response(resp):
+    """
+    Returns True if the response seems to be HTML, False otherwise.
+    """
+    content_type = resp.headers['Content-Type'].lower()
+    return (resp.status_code == 200 
+            and content_type is not None 
+            and content_type.find('html') > -1)
+
+def log_error(e):
+    """
+    It is always a good idea to log errors. 
+    This function just prints them, but you can
+    make it do anything.
+    """
+    print(e)
+    
+
 def getStock(function, symbol, startDate, endDate):
     #alphavantage api key 1YWD5OHNOOE4AFEW
     requestStock = requests.get("https://www.alphavantage.co/query?", {
         'function':'GLOBAL_QUOTE',
         'symbol':'TSLA',
         'datatype':'json',
-        'apikey':'1YWD5OHNOOE4AFEW'
+        'apikey':'1YWD5OHNOOE4AFEW',
+        'pageSize':100,
         })
     jsonResponse = json.dumps(requestStock.json(), indent=4, sort_keys=True)
     return jsonResponse
 
-def getNews(keyword, startDate, endDate): 
+#TODO add star and end date parameters
+def getNews(keyword, page): 
     #newsapi api key e038384cef824e32904127401e34bf4b
-    requestNews = requests.get('https://newsapi.org/v2/top-headlines?', {
+    requestNewsSource = requests.get('https://newsapi.org/v2/everything?', {
         'apiKey':'e038384cef824e32904127401e34bf4b',
-        'country':'us',
         'q':keyword,
+        'pageSize':100,
+        'page':page,
     })
-    jsonResponse = json.dumps(requestNews.json(), indent=4)
+    response = requestNewsSource.content
+    jsonResponse = json.loads(response.decode('utf-8'))
+    
     return jsonResponse
+    
+#key search term, from date and to date using YYYY-MM-DD format
+def getSentiment(keyword):
+    pageNum = 1
+    hasArticles = True
+    responseJson = getNews(keyword, pageNum)
+    if responseJson['status'] == 'ok':
+        print("File was recieved without error")
+        print('There are %s results found' % str(responseJson['totalResults']))
 
-def getSentiment(stockSymbol):
-    articleText = getNews(listOfStocks[stockSymbol])['articles']['content']
-    sentiment = TextBlob(articleText).sentiment
+        #these are some variables that are accessed throughout the function
+        numResults = responseJson['totalResults']
+        articleNumber = 0
+        totalArticlesDone = 0
+        polarity = 0
+        subjectivity = 0
+        
+        #loops through the given page
+        while (pageNum < (numResults/100) and hasArticles):
+            for article in responseJson['articles']:
+                if responseJson['status'] == 'ok':
+
+                    print('\n----- Article #%s %s-----' % (totalArticlesDone, articleNumber))
+                    print(str(responseJson['articles'][articleNumber]['title']))
+                    #collects url, headline and description from json
+                    try:
+                        url = str(responseJson['articles'][articleNumber]['url'])
+                    except:
+                        print('Returned a null url')
+
+                    try:
+                        headline = str(responseJson['articles'][articleNumber]['title'])
+                    except:
+                        print('Returned a null headline')
+                        totalArticlesDone += 1
+                        articleNumber = articleNumber + 1
+                        break
+                    '''
+                    try:
+                        description = str(responseJson['articles'][articleNumber]['description'])
+                    except:
+                        print('Returned a null description')
+                    '''
+                    '''
+                    #gets the article contents from p tags using BS4
+                    raw_html = get(url)
+                    html = BeautifulSoup(raw_html.text, 'html.parser')
+                    content = [p.text for p in html.select('p')]
+                    print('Got article website and parsed its text for')
+                    '''
+                    #gets the sentiment using TextBlob
+                    text = ('%s' % (headline))
+                    #gets the language type
+                    if detect(text) == "en":
+                            
+                        sentiment = TextBlob(text).sentiment
+                        articlePolarity, articleSubjectivity = sentiment
+                        print('Got sentiment for article')
+
+                        #updates values of article
+                        polarity += articlePolarity
+                        subjectivity += articleSubjectivity
+                        articleNumber = articleNumber + 1
+                        totalArticlesDone += 1
+
+                        #calculates average sentiment and subjectivity of articles
+                        avgSentiment = polarity/totalArticlesDone
+                        avgSubjectivity = subjectivity/totalArticlesDone
+                        print('Updating polarity value')
+                        print(articlePolarity, articleSubjectivity)
+
+                    else:
+                        print("Language not english")
+                        articleNumber = articleNumber + 1
+                        break
+
+                     #increments page number, resets article number, outputs new json and gets the next page
+                    if articleNumber >= len(responseJson['articles'])-1:
+                        pageNum += 1
+                        articleNumber = 0
+                        print('On page %s of %s' % (pageNum, (numResults/100)))
+                        responseJson = getNews(keyword, pageNum)
+                        continue
+                else:
+                    print('MAX ARTICLES REACHED')
+                    hasArticles = False
+                    break
+
+        if avgSentiment > 0:
+            print(' %s -- It has a positive sentiment ' % avgSentiment)
+        elif avgSentiment < 0:
+            print(' %s -- It has a negative sentiment ' % avgSentiment)
+        elif avgSentiment == 0:
+            print(' %s -- It has a neutral sentiment ' % avgSentiment)
+        
+        if avgSubjectivity < 0.5 and avgSubjectivity > 0:
+            print(" %s -- The articles opinions were more objective than subjective " % avgSubjectivity)
+        elif avgSubjectivity > 0.5 and avgSubjectivity > 0:
+            print( + " %s -- The articles opinions were more subjective than objective " % avgSubjectivity)
+        
+    else:
+        print('There was an error retrieving the file')
+    
+    #updates sentiment record of the stock
+    currentSentiment = stockSentiment[keyword] = avgSentiment, avgSubjectivity, articleNumber
+    return stockSentiment[keyword]
+print(getSentiment('Tesla'))
