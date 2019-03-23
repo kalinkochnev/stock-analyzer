@@ -100,7 +100,7 @@ def getNews(keyword, page):
     return jsonResponse
     
 #key search term, from date and to date using YYYY-MM-DD format
-def getSentiment(keyword):
+def getNewsSentiment(keyword, headlineBool, contentBool):
     pageNum = 1
     hasArticles = True
     responseJson = getNews(keyword, pageNum)
@@ -113,45 +113,57 @@ def getSentiment(keyword):
         articleNumber = 0
         totalArticlesDone = 0
         polarity = 0
-        subjectivity = 0
+        subjectivity = 0       
         
         #loops through the given page
-        while (pageNum < (numResults/100) and hasArticles):
-            for article in responseJson['articles']:
+        while (pageNum < numResults/100 and hasArticles):
+            if responseJson['status'] != 'ok':
+                    print('MAX ARTICLES REACHED')
+                    hasArticles = False
+                    break
+
+            for article in responseJson['articles']:    
                 if responseJson['status'] == 'ok':
+                    #increments page number, resets article number, outputs new json and gets the next page
+                    if articleNumber >= len(responseJson['articles'])-1:
+                        pageNum += 1
+                        articleNumber = 0
+                        print('On page %s of %s' % (pageNum, (numResults/100)))
+                        responseJson = getNews(keyword, pageNum)
+                        break
 
                     print('\n----- Article #%s %s-----' % (totalArticlesDone, articleNumber))
-                    print(str(responseJson['articles'][articleNumber]['title']))
-                    #collects url, headline and description from json
-                    try:
-                        url = str(responseJson['articles'][articleNumber]['url'])
-                    except:
-                        print('Returned a null url')
+                    headline = str(responseJson['articles'][articleNumber]['title'])
+                    content = ''    
+                    print(headline)
+                    
+                    #checks if the content is english
+                    if detect(headline) == "en":
+                        #If the user wants to analyze content, this will run
+                        if contentBool == True:
+                            try:
+                                url = str(responseJson['articles'][articleNumber]['url'])
+                            except:
+                                print('Returned a null url')
+                            
+                            #gets the article contents from p tags using BS4
+                            raw_html = get(url)
+                            html = BeautifulSoup(raw_html.text, 'html.parser')
+                            content = [p.text for p in html.select('p')]
+                            print('Got article website and parsed its text for')
 
-                    try:
-                        headline = str(responseJson['articles'][articleNumber]['title'])
-                    except:
-                        print('Returned a null headline')
-                        totalArticlesDone += 1
-                        articleNumber = articleNumber + 1
-                        break
-                    '''
-                    try:
-                        description = str(responseJson['articles'][articleNumber]['description'])
-                    except:
-                        print('Returned a null description')
-                    '''
-                    '''
-                    #gets the article contents from p tags using BS4
-                    raw_html = get(url)
-                    html = BeautifulSoup(raw_html.text, 'html.parser')
-                    content = [p.text for p in html.select('p')]
-                    print('Got article website and parsed its text for')
-                    '''
-                    #gets the sentiment using TextBlob
-                    text = ('%s' % (headline))
-                    #gets the language type
-                    if detect(text) == "en":
+                        if headlineBool == True:
+                            #collects headline from json
+                            try:
+                                headline = str(responseJson['articles'][articleNumber]['title'])
+                            except:
+                                print('Returned a null headline')
+                                totalArticlesDone += 1
+                                articleNumber = articleNumber + 1
+                                break
+                
+                        #gets the sentiment using TextBlob
+                        text = ('%s\n%s' % (headline, content))
                             
                         sentiment = TextBlob(text).sentiment
                         articlePolarity, articleSubjectivity = sentiment
@@ -168,35 +180,35 @@ def getSentiment(keyword):
                         avgSubjectivity = subjectivity/totalArticlesDone
                         print('Updating polarity value')
                         print(articlePolarity, articleSubjectivity)
+                        
 
                     else:
                         print("Language not english")
                         articleNumber = articleNumber + 1
                         break
+                   
+            #print(responseJson)
 
-                     #increments page number, resets article number, outputs new json and gets the next page
-                    if articleNumber >= len(responseJson['articles'])-1:
-                        pageNum += 1
-                        articleNumber = 0
-                        print('On page %s of %s' % (pageNum, (numResults/100)))
-                        responseJson = getNews(keyword, pageNum)
-                        continue
-                else:
-                    print('MAX ARTICLES REACHED')
-                    hasArticles = False
-                    break
-
+        #outputs what was analyzed
+        if headlineBool == True and contentBool == False:
+            print('-- Headline analysis --')
+        elif headlineBool == False and contentBool == True:
+            print('-- Content analysis')    
+        elif headlineBool == True and contentBool == True:
+            print('-- Headline and content analysis --')
+        
+        #outputs some information about the numbers
         if avgSentiment > 0:
-            print(' %s -- It has a positive sentiment ' % avgSentiment)
+            print(' %s -- %s has a positive sentiment ' % (avgSentiment, keyword))
         elif avgSentiment < 0:
-            print(' %s -- It has a negative sentiment ' % avgSentiment)
+            print(' %s -- %s has a negative sentiment ' % (avgSentiment, keyword))
         elif avgSentiment == 0:
-            print(' %s -- It has a neutral sentiment ' % avgSentiment)
+            print(' %s -- %s has a neutral sentiment ' % (avgSentiment, keyword))
         
         if avgSubjectivity < 0.5 and avgSubjectivity > 0:
-            print(" %s -- The articles opinions were more objective than subjective " % avgSubjectivity)
+            print(" %s -- The opinions were more objective than subjective " % avgSubjectivity)
         elif avgSubjectivity > 0.5 and avgSubjectivity > 0:
-            print( + " %s -- The articles opinions were more subjective than objective " % avgSubjectivity)
+            print( + " %s -- The opinions were more subjective than objective " % avgSubjectivity)
         
     else:
         print('There was an error retrieving the file')
@@ -204,4 +216,6 @@ def getSentiment(keyword):
     #updates sentiment record of the stock
     currentSentiment = stockSentiment[keyword] = avgSentiment, avgSubjectivity, articleNumber
     return stockSentiment[keyword]
-print(getSentiment('Tesla'))
+
+
+print(getNewsSentiment('Tesla', True, False))
