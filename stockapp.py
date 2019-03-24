@@ -7,8 +7,9 @@ from requests.exceptions import RequestException
 from contextlib import closing
 from bs4 import BeautifulSoup
 from langdetect import detect
-import twitter
+import tweepy
 import re
+import time
 
 with open('keys.json') as f:
     data = json.load(f)
@@ -24,8 +25,13 @@ listOfStocks = {
     'NVDA':'NVIDIA',
     }
 
-#Stock Symbol : (sentiment, number of values)
-stockSentiment = {
+#keyword : (sentiment, polarity, number of values)
+newsSentiment = {
+
+}
+
+#keyword : (sentiment, polarity, number of values)
+twitterSentiment = {
 
 }
 
@@ -217,24 +223,73 @@ def calcNewsSentiment(keyword, headlineBool, contentBool):
         print('There was an error retrieving the file')
     
     #updates sentiment record of the stock
-    stockSentiment[keyword] = avgSentiment, avgSubjectivity, articleNumber
-    return stockSentiment[keyword]
+    newsSentiment[keyword] = keyword, avgSentiment, avgSubjectivity, articleNumber
+    return newsSentiment[keyword]
 
-def getTweets(keyword):
-    api = twitter.Api(
-        consumer_key=data['twitter'][0], 
-        consumer_secret=data['twitter'][1],
-        access_token_key=data['twitter'][2],
-        access_token_secret=data['twitter'][3],
-        )
-    results = api.GetSearch(term=keyword, result_type='popular', return_json=True, count=100, lang='en')
-    rateLimit = api.get_limit()
+def getTweets(keyword, boolRT, numTweets):
+    tweets = []
+    #Authorization for twitter
+    auth = tweepy.OAuthHandler(data['twitter'][0]['consumer_key'], data['twitter'][0]['consumer_secret'])
+    auth.set_access_token(data['twitter'][0]['access_token_key'], data['twitter'][0]['access_token_secret'])
+    api = tweepy.API(auth)
     
-    for num in range(9):
-        print(json.dumps(results['statuses'][num]['text'], indent=3))
-    return results
+    #Handles the limiting twitter does
+    def limit_handled(cursor):
+        while True:
+            try:
+                yield cursor.next()
+            except tweepy.RateLimitError:
+                time.sleep(15 * 60)
 
-def calcTwitterSentiment(keyword):
+    #searches with a query and pages through, checks for limiting, gets # of tweets using .item()
+    for tweet in limit_handled(tweepy.Cursor(api.search, q="Tesla", lang='en', rpp=100).item(10)):
+        #remove RT tag from result
+        print (tweet)
+    
+    return tweets
 
+def calcTwitterSentiment(keyword, boolRT, numTweets):
+    polarity = 0
+    subjectivity = 0
+    tweetNumber = 1
+
+    tweets = getTweets(keyword, boolRT, numTweets)
+    for text in tweets:
+        print('----- Tweet #%s -----' % tweetNumber)
+        print(text)
+        tweetNumber += 1
+
+        #gets the sentiment of the tweet
+        sentiment = TextBlob(text).sentiment
+        tweetPolarity, tweetSubjectivity = sentiment
+        print('Got sentiment for tweet')
+
+        #updates values of article
+        polarity += tweetPolarity
+        subjectivity += tweetSubjectivity
+
+        #calculates average sentiment and subjectivity of articles
+        avgSentiment = polarity/numTweets
+        avgSubjectivity = subjectivity/numTweets
+        print('Updating polarity value')
+        print(tweetPolarity, tweetSubjectivity)
+        twitterSentiment[keyword] = avgSentiment, avgSubjectivity, numTweets
+
+    #outputs some information about the numbers
+    if avgSentiment > 0:
+        print(' %s -- %s has a positive sentiment ' % (avgSentiment, keyword))
+    elif avgSentiment < 0:
+        print(' %s -- %s has a negative sentiment ' % (avgSentiment, keyword))
+    elif avgSentiment == 0:
+        print(' %s -- %s has a neutral sentiment ' % (avgSentiment, keyword))
+    
+    if avgSubjectivity < 0.5 and avgSubjectivity > 0:
+        print(" %s -- The opinions were more objective than subjective " % avgSubjectivity)
+    elif avgSubjectivity > 0.5 and avgSubjectivity > 0:
+        print( + " %s -- The opinions were more subjective than objective " % avgSubjectivity)
+    
+    return twitterSentiment[keyword]
+        
+    
 #print(getNewsSentiment('Tesla', True, False))
-getTweets('tesla')
+getTweets('tesla', True, 100)
