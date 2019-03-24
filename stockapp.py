@@ -242,9 +242,9 @@ def getTweets(keyword, boolRT, numTweets):
                 time.sleep(15 * 60)
 
     #searches with a query and pages through, checks for limiting, gets # of tweets using .item()
-    for tweet in limit_handled(tweepy.Cursor(api.search, q="Tesla", lang='en', rpp=100).item(10)):
+    for tweet in limit_handled(tweepy.Cursor(api.search, q="Tesla", lang='en', rpp=100).items(1)):
         #remove RT tag from result
-        print (tweet)
+        print (tweet.text)
     
     return tweets
 
